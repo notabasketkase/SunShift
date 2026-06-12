@@ -46,10 +46,27 @@ PERSONALIZE_KEY = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize
 # =============================================================================
 # Location / config
 # =============================================================================
+# Options users can toggle in sunshift_config.json. Anything missing from an
+# older config file is filled in with these defaults (and saved back) so
+# upgrading never breaks.
+DEFAULT_OPTIONS = {
+    "switch_theme": True,       # flip Windows light/dark mode at sunrise/sunset
+    "brightness_ramp": False,   # ease monitor brightness up at dawn, down at dusk
+    "day_brightness": 75,       # brightness % during the day
+    "night_brightness": 35,     # brightness % at night
+    "ramp_minutes": 45,         # how long the dawn/dusk brightness glide takes
+}
+
+
 def load_config():
     """Load saved location, or look it up once and save it."""
     if CONFIG_PATH.exists():
-        return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        missing = {k: v for k, v in DEFAULT_OPTIONS.items() if k not in cfg}
+        if missing:
+            cfg.update(missing)
+            CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        return cfg
 
     print("First run — looking up your approximate location from your IP...")
     info = requests.get("https://ipinfo.io/json", timeout=10).json()
@@ -59,6 +76,7 @@ def load_config():
         "longitude": lon,
         "city": info.get("city", "unknown"),
         "timezone": info.get("timezone", ""),  # e.g. "America/New_York"
+        **DEFAULT_OPTIONS,
     }
     CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
     print(f"Saved location: {cfg['city']} ({lat:.3f}, {lon:.3f}) -> {CONFIG_PATH.name}")
@@ -111,6 +129,47 @@ def set_theme(light: bool):
 
 
 # =============================================================================
+# Brightness ramping
+# =============================================================================
+def target_brightness(cfg, now, sunrise, sunset):
+    """What should the brightness be right now?
+
+    Full day brightness in the middle of the day, full night brightness at
+    night, and a smooth linear glide during the ramp window: the first
+    `ramp_minutes` after sunrise (easing up) and the last `ramp_minutes`
+    before sunset (easing down).
+    """
+    day, night = cfg["day_brightness"], cfg["night_brightness"]
+    ramp = timedelta(minutes=max(1, cfg["ramp_minutes"]))
+
+    if now < sunrise or now >= sunset:
+        return night
+    if now < sunrise + ramp:                      # dawn: easing up
+        fraction = (now - sunrise) / ramp
+    elif now >= sunset - ramp:                    # dusk: easing down
+        fraction = (sunset - now) / ramp
+    else:                                         # broad daylight
+        return day
+    return round(night + (day - night) * fraction)
+
+
+def apply_brightness(target):
+    """Gently fade all monitors to the target brightness (1% per quarter second).
+
+    Quietly does nothing if the monitors don't support software control.
+    """
+    try:
+        import screen_brightness_control as sbc
+        current = sbc.get_brightness()
+        if all(abs(b - target) <= 2 for b in current):
+            return  # close enough — don't fiddle
+        sbc.fade_brightness(target, increment=1, interval=0.25)
+        print(f"        brightness {current} -> {target}%")
+    except Exception as e:
+        print(f"        (brightness control unavailable: {e})")
+
+
+# =============================================================================
 # Main logic
 # =============================================================================
 def apply_now(cfg):
@@ -133,11 +192,20 @@ def apply_now(cfg):
         observer = Observer(latitude=cfg["latitude"], longitude=cfg["longitude"])
         daytime = elevation(observer, now) > 0
         next_switch = now + timedelta(hours=6)
+        sunrise = sunset = None  # no ramp possible without sun times
 
-    changed = set_theme(light=daytime)
+    changed = cfg.get("switch_theme", True) and set_theme(light=daytime)
     mode = "light" if daytime else "dark"
     note = "switched to" if changed else "already"
     print(f"[{now:%H:%M}] {note} {mode} mode — next switch at {next_switch:%a %H:%M}")
+
+    if cfg.get("brightness_ramp"):
+        if sunrise is None:  # polar day/night: no ramp, just day or night level
+            target = cfg["day_brightness"] if daytime else cfg["night_brightness"]
+        else:
+            target = target_brightness(cfg, now, sunrise, sunset)
+        apply_brightness(target)
+
     return next_switch
 
 
@@ -150,6 +218,11 @@ def main():
         print(f"Location: {cfg['city']} ({cfg['latitude']:.3f}, {cfg['longitude']:.3f})")
         print(f"Today:    sunrise {sunrise:%H:%M}, sunset {sunset:%H:%M}")
         print(f"Theme:    currently {mode} mode")
+        if cfg.get("brightness_ramp"):
+            target = target_brightness(cfg, datetime.now().astimezone(), sunrise, sunset)
+            print(f"Ramp:     on — brightness target right now is {target}%")
+        else:
+            print("Ramp:     off (set \"brightness_ramp\": true in the config to enable)")
         return
 
     if "--once" in sys.argv:

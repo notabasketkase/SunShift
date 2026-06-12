@@ -20,6 +20,11 @@ back to sleep.
   checking the sun's actual elevation)
 - 🔒 **Private** — after the one-time location lookup, everything runs
   offline. Your location never leaves your machine.
+- 🌅 **Brightness ramping (optional)** — instead of only flipping the theme,
+  SunShift can ease your monitor brightness down across the last 45 minutes
+  before sunset and back up after sunrise. No sudden changes, ever — designed
+  with photosensitive users in mind. Works on laptop screens and any external
+  monitor that supports DDC/CI (most modern ones do).
 - 🪶 **Light touch** — it only flips the standard Windows light/dark setting
   (the same one in Settings → Personalization → Colors). Nothing else is
   touched, and you can override it manually any time.
@@ -47,6 +52,28 @@ SunShift.exe --status    show your location, today's sun times, current theme
 SunShift.exe --once      set the correct theme for right now, then exit
 SunShift.exe             run continuously, switching at each sunrise/sunset
 ```
+
+## Options
+
+Everything is configured in `sunshift_config.json` (created next to the app
+on first run):
+
+```json
+{
+  "switch_theme": true,      // flip Windows light/dark mode with the sun
+  "brightness_ramp": false,  // ease monitor brightness at dawn and dusk
+  "day_brightness": 75,      // brightness % during the day
+  "night_brightness": 35,    // brightness % at night
+  "ramp_minutes": 45         // how long the dawn/dusk glide takes
+}
+```
+
+Enable whichever combination you like — theme only, brightness only, or both.
+
+**Tip:** pair SunShift with Windows' built-in **Night light** (Settings →
+System → Display → Night light, schedule "Sunset to sunrise") and your
+evenings get all three layers: colors warm gradually, brightness eases down,
+and the dark theme arrives on an already-soft screen.
 
 ## Running from source
 
