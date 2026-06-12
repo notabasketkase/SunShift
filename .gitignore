@@ -1,0 +1,7 @@
+# Personal location config — generated on first run, never commit
+sunshift_config.json
+
+# Python build artifacts
+__pycache__/
+build/
+dist/
